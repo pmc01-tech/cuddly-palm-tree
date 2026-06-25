@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GRID[WAR] — 2D Array Battleship</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+
+  :root {
+    --bg: #050a0f;
+    --ocean: #06111a;
+    --panel: #0a1a26;
+    --border: #0d3a52;
+    --accent: #00e5ff;
+    --accent2: #ff6b35;
+    --hit: #ff4444;
+    --miss: #1a4a6a;
+    --ship: #1a3a1a;
+    --ship-border: #2a6a2a;
+    --sunk: #3a0000;
+    --text: #b0d8e8;
+    --dim: #3a6a7a;
+    --green: #00ff88;
+    --yellow: #ffd700;
+    --grid-size: 52px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.03) 2px,
+      rgba(0,0,0,0.03) 4px
+    );
+    pointer-events: none;
+    z-index: 999;
+  }
+
+  header {
+    width: 100%;
+    padding: 18px 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+
+  .logo {
+    font-family: 'Orbitron', monospace;
+    font-weight: 900;
+    font-size: 1.4rem;
+    color: var(--accent);
+    letter-spacing: 3px;
+    text-shadow: 0 0 20px var(--accent);
+  }
+
+  .logo span { color: var(--accent2); }
+
+  .status-bar {
+    display: flex;
+    gap: 24px;
+    align-items: center;
+    font-size: 0.8rem;
+    color: var(--dim);
+  }
+
+  .status-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .status-val {
+    font-family: 'Orbitron', monospace;
+    font-size: 1.1rem;
+    color: var(--accent);
+  }
+  .status-val.danger { color: var(--hit); }
+  .status-val.good { color: var(--green); }
+
+  main {
+    display: flex;
+    gap: 28px;
+    padding: 28px 20px;
+    align-items: flex-start;
+    justify-content: center;
+    flex-wrap: wrap;
+    width: 100%;
+    max-width: 1100px;
+  }
+
+  /* ---- GRID SECTION ---- */
+  .grid-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .grid-label {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 3px;
+    color: var(--dim);
+    text-transform: uppercase;
+  }
+
+  .grid-wrapper {
+    position: relative;
+    padding: 0 0 0 32px;
+  }
+
+  .col-indices {
+    display: flex;
+    padding-left: 0;
+    margin-bottom: 4px;
+  }
+
+  .col-index {
+    width: var(--grid-size);
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--accent);
+    opacity: 0.6;
+  }
+
+  .row-with-index {
+    display: flex;
+    align-items: center;
+  }
+
+  .row-index {
+    width: 28px;
+    text-align: right;
+    padding-right: 6px;
+    font-size: 0.75rem;
+    color: var(--accent);
+    opacity: 0.6;
+    flex-shrink: 0;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(8, var(--grid-size));
+    gap: 2px;
+    background: var(--border);
+    border: 2px solid var(--border);
+    box-shadow: 0 0 30px rgba(0,229,255,0.08), inset 0 0 30px rgba(0,0,0,0.5);
+  }
+
+  .cell {
+    width: var(--grid-size);
+    height: var(--grid-size);
+    background: var(--ocean);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    position: relative;
+    transition: background 0.2s;
+    cursor: default;
+  }
+
+  .cell.ship { background: var(--ship); border: 1px solid var(--ship-border); }
+  .cell.hit {
+    background: var(--sunk);
+    animation: hitFlash 0.3s ease;
+  }
+  .cell.hit::after {
+    content: '💥';
+    font-size: 1.4rem;
+  }
+  .cell.miss {
+    background: var(--miss);
+  }
+  .cell.miss::after {
+    content: '·';
+    font-size: 2rem;
+    color: var(--dim);
+  }
+  .cell.sunk { background: #200000; }
+  .cell.sunk::after { content: '🔥'; font-size: 1rem; }
+
+  .cell.last-target {
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
+
+  @keyframes hitFlash {
+    0% { background: #ff6600; transform: scale(1.1); }
+    100% { background: var(--sunk); transform: scale(1); }
+  }
+
+  /* ---- INPUT PANEL ---- */
+  .input-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 20px;
+    width: 320px;
+    flex-shrink: 0;
+    box-shadow: 0 0 20px rgba(0,0,0,0.5);
+  }
+
+  .panel-title {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.75rem;
+    letter-spacing: 3px;
+    color: var(--dim);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 10px;
+    margin-bottom: 16px;
+  }
+
+  .terminal-input-wrap {
+    background: #02080d;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    transition: border-color 0.2s;
+  }
+
+  .terminal-input-wrap:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 10px rgba(0,229,255,0.2);
+  }
+
+  .terminal-input-wrap.error {
+    border-color: var(--hit);
+    box-shadow: 0 0 10px rgba(255,68,68,0.3);
+    animation: shake 0.3s ease;
+  }
+
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-6px); }
+    75% { transform: translateX(6px); }
+  }
+
+  .prompt { color: var(--green); font-size: 0.9rem; }
+
+  #coord-input {
+    background: none;
+    border: none;
+    outline: none;
+    color: var(--accent);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1rem;
+    flex: 1;
+    caret-color: var(--accent);
+  }
+
+  #coord-input::placeholder { color: var(--dim); }
+
+  .fire-btn {
+    width: 100%;
+    padding: 12px;
+    background: none;
+    border: 1px solid var(--accent2);
+    color: var(--accent2);
+    font-family: 'Orbitron', monospace;
+    font-size: 0.85rem;
+    letter-spacing: 3px;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.15s;
+    margin-bottom: 14px;
+  }
+
+  .fire-btn:hover {
+    background: var(--accent2);
+    color: var(--bg);
+    box-shadow: 0 0 20px rgba(255,107,53,0.4);
+  }
+
+  .fire-btn:active { transform: scale(0.97); }
+  .fire-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  /* Feedback message */
+  #feedback {
+    min-height: 52px;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    padding: 10px;
+    background: #02080d;
+    border-radius: 3px;
+    border-left: 3px solid var(--dim);
+    margin-bottom: 14px;
+    transition: border-color 0.2s;
+  }
+
+  #feedback.hit-msg { border-color: var(--hit); color: #ff9999; }
+  #feedback.miss-msg { border-color: var(--dim); color: var(--dim); }
+  #feedback.sunk-msg { border-color: var(--yellow); color: var(--yellow); }
+  #feedback.error-msg { border-color: var(--hit); color: var(--hit); }
+  #feedback.good-msg { border-color: var(--green); color: var(--green); }
+
+  /* Fleet tracker */
+  .fleet-title {
+    font-size: 0.7rem;
+    color: var(--dim);
+    letter-spacing: 2px;
+    margin-bottom: 8px;
+  }
+
+  .fleet-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+
+  .fleet-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.8rem;
+  }
+
+  .ship-name { flex: 1; color: var(--text); }
+  .ship-name.sunk-ship { color: var(--dim); text-decoration: line-through; }
+
+  .ship-hp {
+    display: flex;
+    gap: 3px;
+  }
+
+  .hp-block {
+    width: 12px;
+    height: 12px;
+    background: var(--ship-border);
+    border: 1px solid var(--dim);
+    transition: all 0.3s;
+  }
+
+  .hp-block.damaged { background: var(--hit); border-color: var(--hit); box-shadow: 0 0 4px var(--hit); }
+  .hp-block.destroyed { background: #2a0000; border-color: #500000; }
+
+  /* Shot log */
+  .log-title {
+    font-size: 0.7rem;
+    color: var(--dim);
+    letter-spacing: 2px;
+    margin-bottom: 6px;
+  }
+
+  #shot-log {
+    font-size: 0.75rem;
+    max-height: 90px;
+    overflow-y: auto;
+    line-height: 1.8;
+    color: var(--dim);
+  }
+
+  #shot-log .log-hit { color: var(--hit); }
+  #shot-log .log-miss { color: #2a5a6a; }
+  #shot-log .log-sunk { color: var(--yellow); }
+
+  /* ---- SYNTAX HINT ---- */
+  .syntax-hint {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 14px 18px;
+    font-size: 0.8rem;
+    line-height: 1.9;
+  }
+
+  .syntax-hint .hint-title {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 3px;
+    color: var(--dim);
+    margin-bottom: 8px;
+  }
+
+  .code { color: var(--accent); }
+  .code-comment { color: #2a6a5a; }
+
+  /* ---- OVERLAY SCREENS ---- */
+  .overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(5,10,15,0.92);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .overlay.visible { display: flex; }
+
+  .overlay-box {
+    background: var(--panel);
+    border: 2px solid var(--border);
+    border-radius: 6px;
+    padding: 40px 50px;
+    text-align: center;
+    max-width: 500px;
+    box-shadow: 0 0 60px rgba(0,229,255,0.1);
+  }
+
+  .overlay-box h2 {
+    font-family: 'Orbitron', monospace;
+    font-size: 2rem;
+    color: var(--accent);
+    text-shadow: 0 0 30px var(--accent);
+    margin-bottom: 8px;
+  }
+
+  .overlay-box h2.win { color: var(--green); text-shadow: 0 0 30px var(--green); }
+  .overlay-box h2.lose { color: var(--hit); text-shadow: 0 0 30px var(--hit); }
+
+  .overlay-box p { color: var(--dim); margin: 8px 0; line-height: 1.7; font-size: 0.9rem; }
+  .overlay-box .big-stat { font-size: 2rem; color: var(--yellow); font-family: 'Orbitron', monospace; }
+
+  /* Array debrief */
+  .array-output {
+    background: #02080d;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 14px;
+    font-size: 0.72rem;
+    text-align: left;
+    margin: 14px 0;
+    color: var(--text);
+    max-height: 200px;
+    overflow-y: auto;
+    line-height: 1.8;
+  }
+
+  .arr-row { margin: 1px 0; }
+  .arr-H { color: var(--hit); font-weight: bold; }
+  .arr-M { color: #1a4a6a; }
+  .arr-S { color: var(--green); }
+  .arr-dot { color: #0d2a3a; }
+
+  .overlay-btn {
+    padding: 12px 32px;
+    background: none;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-family: 'Orbitron', monospace;
+    font-size: 0.8rem;
+    letter-spacing: 3px;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.15s;
+    margin-top: 10px;
+  }
+
+  .overlay-btn:hover { background: var(--accent); color: var(--bg); box-shadow: 0 0 20px rgba(0,229,255,0.3); }
+
+  /* Timer */
+  #timer-display {
+    font-family: 'Orbitron', monospace;
+    font-size: 1.1rem;
+    color: var(--yellow);
+    transition: color 0.3s;
+  }
+
+  #timer-display.danger { color: var(--hit); animation: pulse 0.5s infinite; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* Shots counter colour */
+  #shots-left.danger { color: var(--hit); }
+
+  /* New game btn in header */
+  .new-game-btn {
+    padding: 6px 16px;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--dim);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.75rem;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.15s;
+    letter-spacing: 1px;
+  }
+
+  .new-game-btn:hover { border-color: var(--accent2); color: var(--accent2); }
+
+  /* Radar ping on ships when hovered  */
+  .cell:hover { opacity: 0.8; }
+
+  /* Responsive */
+  @media (max-width: 860px) {
+    :root { --grid-size: 42px; }
+    main { gap: 16px; padding: 16px 10px; }
+    .input-panel { width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">GRID<span>[</span>WAR<span>]</span></div>
+  <div class="status-bar">
+    <div class="status-item">
+      <span class="status-val" id="shots-left">35</span>
+      <span>shots left</span>
+    </div>
+    <div class="status-item">
+      <span class="status-val good" id="hits-count">0</span>
+      <span>hits</span>
+    </div>
+    <div class="status-item">
+      <span class="status-val" id="timer-display">03:00</span>
+      <span>time</span>
+    </div>
+    <div class="status-item">
+      <span class="status-val" id="score-display">0</span>
+      <span>score</span>
+    </div>
+  </div>
+  <button class="new-game-btn" onclick="newGame()">[ NEW GAME ]</button>
+</header>
+
+<main>
+  <div style="display:flex;flex-direction:column;gap:16px;">
+
+    <div class="grid-section">
+      <div class="grid-label">// enemy_fleet_grid[row][col]</div>
+      <div class="grid-wrapper">
+        <div class="col-indices" id="col-indices"></div>
+        <div id="grid-rows"></div>
+      </div>
+    </div>
+
+    <div class="syntax-hint">
+      <div class="hint-title">// SYNTAX REFERENCE</div>
+      <div><span class="code">grid[row][col]</span> &nbsp;<span class="code-comment"># row first, then column</span></div>
+      <div><span class="code">grid[0][0]</span> &nbsp;&nbsp;&nbsp;<span class="code-comment"># top-left corner</span></div>
+      <div><span class="code">grid[6][6]</span> &nbsp;&nbsp;&nbsp;<span class="code-comment"># bottom-right corner</span></div>
+      <div style="margin-top:6px;color:#2a6a5a;font-size:0.75rem"># indices run 0 → 6 on both axes</div>
+    </div>
+  </div>
+
+  <div class="input-panel">
+    <div class="panel-title">// TARGETING COMPUTER</div>
+
+    <div class="terminal-input-wrap" id="input-wrap">
+      <span class="prompt">>>></span>
+      <input type="text" id="coord-input" placeholder="grid[row][col]" autocomplete="off" spellcheck="false" />
+    </div>
+
+    <button class="fire-btn" id="fire-btn" onclick="fireShot()">▶ FIRE TORPEDO</button>
+
+    <div id="feedback" class="miss-msg">Enter a target coordinate using Python 2D array syntax.</div>
+
+    <div class="fleet-title">// ENEMY FLEET STATUS</div>
+    <div class="fleet-list" id="fleet-list"></div>
+
+    <div class="log-title">// SHOT LOG</div>
+    <div id="shot-log"></div>
+  </div>
+</main>
+
+<!-- WIN/LOSE OVERLAYS -->
+<div class="overlay" id="overlay">
+  <div class="overlay-box">
+    <h2 id="overlay-title">VICTORY</h2>
+    <p id="overlay-sub"></p>
+    <div class="big-stat" id="overlay-stat"></div>
+    <p id="overlay-msg"></p>
+    <div class="array-output" id="array-output"></div>
+    <button class="overlay-btn" onclick="newGame()">[ PLAY AGAIN ]</button>
+  </div>
+</div>
+
+<script>
+const GRID_SIZE = 7;
+const SHIPS = [
+  { name: 'Carrier',    size: 5 },
+  { name: 'Battleship', size: 4 },
+  { name: 'Cruiser',    size: 3 },
+  { name: 'Destroyer',  size: 2 },
+];
+
+let grid, shipGrid, cellEls, gameOver, shots, hits, streak, score;
+let timerInterval, timeLeft;
+const MAX_SHOTS = 35;
+const TIME_LIMIT = 180; // seconds
+
+function initState() {
+  grid      = Array.from({length: GRID_SIZE}, () => Array(GRID_SIZE).fill(''));
+  shipGrid  = Array.from({length: GRID_SIZE}, () => Array(GRID_SIZE).fill(null));
+  gameOver  = false;
+  shots     = 0;
+  hits      = 0;
+  streak    = 0;
+  score     = 0;
+  timeLeft  = TIME_LIMIT;
+}
+
+function placeShips() {
+  for (const ship of SHIPS) {
+    let placed = false;
+    while (!placed) {
+      const horiz = Math.random() < 0.5;
+      const maxR = horiz ? GRID_SIZE : GRID_SIZE - ship.size;
+      const maxC = horiz ? GRID_SIZE - ship.size : GRID_SIZE;
+      const r = Math.floor(Math.random() * maxR);
+      const c = Math.floor(Math.random() * maxC);
+      let ok = true;
+      for (let i = 0; i < ship.size; i++) {
+        const tr = horiz ? r : r + i;
+        const tc = horiz ? c + i : c;
+        if (shipGrid[tr][tc]) { ok = false; break; }
+      }
+      if (ok) {
+        const cells = [];
+        for (let i = 0; i < ship.size; i++) {
+          const tr = horiz ? r : r + i;
+          const tc = horiz ? c + i : c;
+          shipGrid[tr][tc] = ship;
+          cells.push([tr, tc]);
+        }
+        ship.cells = cells;
+        ship.hits = 0;
+        ship.sunk = false;
+        placed = true;
+      }
+    }
+  }
+}
+
+function buildGridUI() {
+  const colIdx = document.getElementById('col-indices');
+  colIdx.innerHTML = '<div style="width:28px;flex-shrink:0;"></div>';
+  for (let c = 0; c < GRID_SIZE; c++) {
+    colIdx.innerHTML += `<div class="col-index">${c}</div>`;
+  }
+
+  const rowsEl = document.getElementById('grid-rows');
+  rowsEl.innerHTML = '';
+  cellEls = [];
+  for (let r = 0; r < GRID_SIZE; r++) {
+    const rowWrap = document.createElement('div');
+    rowWrap.className = 'row-with-index';
+    rowWrap.innerHTML = `<div class="row-index">${r}</div>`;
+    const gridEl = document.createElement('div');
+    gridEl.className = 'grid';
+    gridEl.style.gridTemplateColumns = `repeat(${GRID_SIZE}, var(--grid-size))`;
+    cellEls[r] = [];
+    for (let c = 0; c < GRID_SIZE; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.dataset.r = r;
+      cell.dataset.c = c;
+      gridEl.appendChild(cell);
+      cellEls[r][c] = cell;
+    }
+    rowWrap.appendChild(gridEl);
+    rowsEl.appendChild(rowWrap);
+  }
+}
+
+function buildFleetUI() {
+  const fl = document.getElementById('fleet-list');
+  fl.innerHTML = '';
+  for (const ship of SHIPS) {
+    const item = document.createElement('div');
+    item.className = 'fleet-item';
+    item.id = 'fleet-' + ship.name;
+
+    const blocks = Array.from({length: ship.size}, () => '<div class="hp-block"></div>').join('');
+    item.innerHTML = `
+      <div class="ship-name">${ship.name}</div>
+      <div class="ship-hp" id="hp-${ship.name}">${blocks}</div>
+    `;
+    fl.appendChild(item);
+  }
+}
+
+function updateHUD() {
+  const shotsLeft = MAX_SHOTS - shots;
+  document.getElementById('shots-left').textContent = shotsLeft;
+  document.getElementById('shots-left').className = 'status-val' + (shotsLeft <= 5 ? ' danger' : '');
+  document.getElementById('hits-count').textContent = hits;
+  document.getElementById('score-display').textContent = score;
+}
+
+function startTimer() {
+  clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    timeLeft--;
+    const m = String(Math.floor(timeLeft / 60)).padStart(2, '0');
+    const s = String(timeLeft % 60).padStart(2, '0');
+    const el = document.getElementById('timer-display');
+    el.textContent = `${m}:${s}`;
+    el.className = timeLeft <= 20 ? 'status-val danger' : 'status-val';
+    if (timeLeft <= 0) endGame(false, 'timeout');
+  }, 1000);
+}
+
+function parseInput(val) {
+  // Accept: grid[r][c], board[r][c], enemy_fleet_grid[r][c] etc
+  const match = val.trim().match(/^\w+\[(\d+)\]\[(\d+)\]$/);
+  if (!match) return null;
+  const r = parseInt(match[1]);
+  const c = parseInt(match[2]);
+  if (r < 0 || r >= GRID_SIZE || c < 0 || c >= GRID_SIZE) return null;
+  return [r, c];
+}
+
+function setFeedback(msg, type) {
+  const el = document.getElementById('feedback');
+  el.textContent = msg;
+  el.className = type + '-msg';
+}
+
+function addLog(msg, type) {
+  const log = document.getElementById('shot-log');
+  const line = document.createElement('div');
+  line.className = 'log-' + type;
+  line.textContent = msg;
+  log.prepend(line);
+}
+
+function updateFleetUI(ship) {
+  const hpEl = document.getElementById('hp-' + ship.name);
+  const blocks = hpEl.querySelectorAll('.hp-block');
+  blocks.forEach((b, i) => {
+    if (ship.sunk) {
+      b.className = 'hp-block destroyed';
+    } else if (i < ship.hits) {
+      b.className = 'hp-block damaged';
+    }
+  });
+  if (ship.sunk) {
+    const nameEl = document.querySelector('#fleet-' + ship.name + ' .ship-name');
+    if (nameEl) nameEl.className = 'ship-name sunk-ship';
+  }
+}
+
+function fireShot() {
+  if (gameOver) return;
+  const input = document.getElementById('coord-input');
+  const val = input.value;
+  const wrap = document.getElementById('input-wrap');
+
+  if (!val.trim()) return;
+
+  const coords = parseInput(val);
+  if (!coords) {
+    // Syntax error
+    streak = 0;
+    wrap.className = 'terminal-input-wrap error';
+    setTimeout(() => wrap.className = 'terminal-input-wrap', 500);
+
+    // Give a helpful error
+    let hint = 'Syntax error. ';
+    if (!val.includes('[')) hint += 'Missing brackets — try grid[row][col]';
+    else if ((val.match(/\[/g)||[]).length < 2) hint += 'Need two sets of brackets — grid[row][col]';
+    else if (/[a-zA-Z]\d/.test(val) || /\d,[a-zA-Z]/.test(val)) hint += 'Use numbers not letters — indices are 0–7';
+    else hint += 'Use format grid[row][col] — e.g. grid[3][5]';
+
+    setFeedback(hint, 'error');
+    input.select();
+    return;
+  }
+
+  const [r, c] = coords;
+  const cell = cellEls[r][c];
+
+  if (grid[r][c] === 'H' || grid[r][c] === 'M') {
+    setFeedback(`grid[${r}][${c}] already targeted. Choose a different cell.`, 'error');
+    wrap.className = 'terminal-input-wrap error';
+    setTimeout(() => wrap.className = 'terminal-input-wrap', 500);
+    input.select();
+    return;
+  }
+
+  // Remove last-target highlight
+  document.querySelectorAll('.last-target').forEach(el => el.classList.remove('last-target'));
+  cell.classList.add('last-target');
+
+  shots++;
+  const ship = shipGrid[r][c];
+
+  if (ship) {
+    grid[r][c] = 'H';
+    cell.className = 'cell hit last-target';
+    ship.hits++;
+    hits++;
+    streak++;
+
+    const streakBonus = streak > 1 ? ` +STREAK×${streak}` : '';
+    const baseScore = 100;
+    const earned = baseScore * streak;
+    score += earned;
+
+    if (ship.hits >= ship.size) {
+      ship.sunk = true;
+      score += 500;
+      // Mark all cells sunk
+      for (const [sr, sc] of ship.cells) {
+        cellEls[sr][sc].className = 'cell sunk last-target';
+        grid[sr][sc] = 'H';
+      }
+      updateFleetUI(ship);
+      setFeedback(`💥 SUNK! ${ship.name} destroyed! +500 bonus. ${streakBonus}`, 'sunk');
+      addLog(`grid[${r}][${c}] → SUNK ${ship.name}`, 'sunk');
+
+      if (SHIPS.every(s => s.sunk)) {
+        endGame(true, 'all_sunk');
+        input.value = '';
+        return;
+      }
+    } else {
+      updateFleetUI(ship);
+      setFeedback(`🎯 HIT! grid[${r}][${c}] — ${ship.name} taking damage! +${earned}${streakBonus}`, 'hit');
+      addLog(`grid[${r}][${c}] → HIT (${ship.name})`, 'hit');
+    }
+  } else {
+    grid[r][c] = 'M';
+    cell.className = 'cell miss last-target';
+    streak = 0;
+    setFeedback(`MISS. grid[${r}][${c}] is open ocean.`, 'miss');
+    addLog(`grid[${r}][${c}] → miss`, 'miss');
+  }
+
+  updateHUD();
+  input.value = '';
+  input.focus();
+
+  if (shots >= MAX_SHOTS) endGame(false, 'no_shots');
+}
+
+function endGame(win, reason) {
+  gameOver = true;
+  clearInterval(timerInterval);
+  document.getElementById('fire-btn').disabled = true;
+
+  const overlay = document.getElementById('overlay');
+  const title = document.getElementById('overlay-title');
+  const sub = document.getElementById('overlay-sub');
+  const stat = document.getElementById('overlay-stat');
+  const msg = document.getElementById('overlay-msg');
+  const arr = document.getElementById('array-output');
+
+  overlay.className = 'overlay visible';
+
+  if (win) {
+    title.textContent = 'FLEET DESTROYED';
+    title.className = 'win';
+    sub.textContent = 'All enemy ships sunk.';
+    stat.textContent = score.toLocaleString() + ' pts';
+    msg.textContent = `Shots fired: ${shots} / ${MAX_SHOTS}  ·  Time remaining: ${timeLeft}s`;
+  } else {
+    title.textContent = reason === 'timeout' ? 'TIME\'S UP' : 'AMMO DEPLETED';
+    title.className = 'lose';
+    const sunken = SHIPS.filter(s => s.sunk).length;
+    sub.textContent = `${sunken} of ${SHIPS.length} ships sunk.`;
+    stat.textContent = score.toLocaleString() + ' pts';
+    msg.textContent = 'The enemy fleet escaped.';
+
+    // Reveal remaining ships
+    for (const ship of SHIPS) {
+      if (!ship.sunk) {
+        for (const [sr, sc] of ship.cells) {
+          cellEls[sr][sc].className = 'cell ship';
+        }
+      }
+    }
+  }
+
+  // Build array debrief
+  arr.innerHTML = '<div style="color:#3a6a7a;margin-bottom:6px;"># Final state of grid[][]:</div>';
+  arr.innerHTML += '<div style="color:#2a5a6a;">grid = [</div>';
+  for (let r = 0; r < GRID_SIZE; r++) {
+    let rowHTML = '&nbsp;&nbsp;[ ';
+    for (let c = 0; c < GRID_SIZE; c++) {
+      const v = grid[r][c];
+      if (v === 'H') rowHTML += `<span class="arr-H">'H'</span>`;
+      else if (v === 'M') rowHTML += `<span class="arr-M">'M'</span>`;
+      else if (shipGrid[r][c]) rowHTML += `<span class="arr-S">'S'</span>`;
+      else rowHTML += `<span class="arr-dot">'.'</span>`;
+      if (c < GRID_SIZE - 1) rowHTML += ', ';
+    }
+    rowHTML += ` ]${r < GRID_SIZE - 1 ? ',' : ''}`;
+    arr.innerHTML += `<div class="arr-row">${rowHTML}&nbsp;<span style="color:#1a3a2a;"># row ${r}</span></div>`;
+  }
+  arr.innerHTML += '<div style="color:#2a5a6a;">]</div>';
+}
+
+function newGame() {
+  clearInterval(timerInterval);
+  document.getElementById('overlay').className = 'overlay';
+  document.getElementById('fire-btn').disabled = false;
+  document.getElementById('shot-log').innerHTML = '';
+  document.getElementById('coord-input').value = '';
+  document.getElementById('feedback').className = 'miss-msg';
+  document.getElementById('feedback').textContent = 'Enter a target coordinate using Python 2D array syntax.';
+
+  initState();
+  placeShips();
+  buildGridUI();
+  buildFleetUI();
+  updateHUD();
+  startTimer();
+
+  document.getElementById('coord-input').focus();
+}
+
+// Enter key fires
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('coord-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') fireShot();
+  });
+  newGame();
+});
+</script>
+</body>
+</html>
